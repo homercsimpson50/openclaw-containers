@@ -379,6 +379,160 @@ Integrity checksums        ❌         ❌        ❌            ✅
 
 ---
 
+## Distribution & Installation
+
+### How Customers Get It
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                      DISTRIBUTION CHANNELS                          │
+│                                                                     │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐           │
+│  │   npm    │  │  brew    │  │  Docker  │  │  .pkg /  │           │
+│  │          │  │          │  │  Hub     │  │  .deb    │           │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘           │
+│       │              │              │              │                 │
+│       ▼              ▼              ▼              ▼                 │
+│  OpenClaw skill  CLI binary     Sidecar       System daemon         │
+│  (lightweight)   (native)       container     (full protection)     │
+│                                                                     │
+│  TRUST LEVEL:                                                       │
+│  ◐ Least         ◑ Medium       ● High         ● Highest           │
+│  (can be          (runs as       (isolated      (runs as root,      │
+│   tampered)        user)          namespace)     immutable)         │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Channel 1: npm (Lightweight — OpenClaw Skill)
+
+Lowest friction install. Customer gets it as a ClawHub/npm skill. Good for try-before-you-buy, but the skill itself can be tampered with (chicken-and-egg problem).
+
+```bash
+# Install via ClawHub
+npx clawhub@latest install pivetta-shield
+
+# Or install via npm directly
+npm install -g @pivetta/skill-monitor
+
+# Or manual
+curl -sL https://pivetta.security/skill.md > ~/.openclaw/skills/pivetta-shield/SKILL.md
+```
+
+**Best for:** Individual developers, quick evaluation, CI/CD pre-install scanning.
+
+**Limitation:** Runs inside OpenClaw as a skill — same privilege level as the things it's scanning. A sophisticated attacker could tamper with it. This is the "free tier" / entry point.
+
+### Channel 2: Homebrew (macOS Native CLI)
+
+Installs a standalone binary that runs outside OpenClaw. Can't be tampered with by skills.
+
+```bash
+# Install
+brew tap pivetta-security/tools
+brew install pivetta-monitor
+
+# Run one-off scan
+pivetta-monitor scan ~/.openclaw/skills/
+
+# Run as persistent watcher (foreground)
+pivetta-monitor watch ~/.openclaw/skills/
+
+# Install as LaunchDaemon (requires sudo, full protection)
+sudo pivetta-monitor install-daemon
+```
+
+**Best for:** macOS power users, security-conscious developers who want always-on monitoring without Docker.
+
+**Binary built with:** Go or Rust (single static binary, no dependencies, cross-platform).
+
+**What `brew install` gives you:**
+- `pivetta-monitor` CLI binary
+- Signature database at `$(brew --prefix)/share/pivetta/signatures.db`
+- Man page
+- Shell completions (bash/zsh/fish)
+
+**What `sudo pivetta-monitor install-daemon` adds:**
+- LaunchDaemon plist at `/Library/LaunchDaemons/com.pivetta.monitor.plist`
+- Copies binary + signatures to `/Library/PivettaSec/`
+- Starts the daemon immediately
+- Runs as root, survives reboot, can't be killed by user-space OpenClaw
+
+### Channel 3: Docker Hub (Sidecar Container)
+
+For customers already running OpenClaw in Docker.
+
+```bash
+# Pull the image
+docker pull pivetta/skill-monitor:latest
+
+# Add to existing docker-compose.yml (see Model 1 above)
+```
+
+**Best for:** Teams running containerized OpenClaw deployments, enterprise environments.
+
+**Image details:**
+- Based on `alpine` (minimal attack surface, ~15MB)
+- Scanner binary + signatures baked in
+- No shell in production image (`FROM scratch` variant available)
+- Multi-arch: `linux/amd64`, `linux/arm64`
+- Signed with cosign/sigstore for supply chain integrity
+
+### Channel 4: Native Packages (.pkg / .deb / .rpm)
+
+Full system-level installation for enterprise customers who want maximum protection.
+
+```bash
+# macOS — signed .pkg installer
+curl -O https://releases.pivetta.security/monitor/latest/pivetta-monitor.pkg
+sudo installer -pkg pivetta-monitor.pkg -target /
+
+# Debian/Ubuntu
+curl -fsSL https://releases.pivetta.security/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/pivetta.gpg
+echo "deb [signed-by=/etc/apt/keyrings/pivetta.gpg] https://releases.pivetta.security/apt stable main" | \
+  sudo tee /etc/apt/sources.list.d/pivetta.list
+sudo apt update && sudo apt install pivetta-monitor
+
+# RHEL/Fedora
+sudo dnf install https://releases.pivetta.security/rpm/pivetta-monitor-latest.rpm
+```
+
+**Best for:** Enterprise SOC teams, managed deployments, compliance requirements.
+
+### Channel Summary
+
+| Channel | Install Command | Runs As | Tamper-Proof | Auto-Update | Best For |
+|---|---|---|---|---|---|
+| **npm/ClawHub** | `npx clawhub install pivetta-shield` | User (inside OpenClaw) | No | `clawhub update` | Evaluation, CI/CD |
+| **Homebrew** | `brew install pivetta-monitor` | User or root (daemon) | Yes (daemon mode) | `brew upgrade` | macOS developers |
+| **Docker Hub** | `docker pull pivetta/skill-monitor` | Container (isolated) | Yes | Image tag/pull | Docker deployments |
+| **.pkg/.deb/.rpm** | `sudo installer -pkg ...` | Root (system daemon) | Yes | Signed repo updates | Enterprise / SOC |
+
+### Upgrade Path (Funnel)
+
+```
+    npm skill (free)                    ← Try it, see the value
+         │
+         ▼
+    brew install (free)                 ← Want tamper-proof? Go native
+         │
+         ▼
+    brew + daemon (free)                ← Want always-on? Install daemon
+         │
+         ▼
+    Enterprise pkg + dashboard (paid)   ← Want fleet management? Pay us
+```
+
+The free tiers do the scanning. The paid tier adds:
+- Centralized dashboard for multiple machines/containers
+- Fleet-wide skill inventory and drift tracking
+- Alert routing (Slack, PagerDuty, email, webhook)
+- Compliance reports (SOC 2, ISO 27001)
+- Signature DB priority updates
+- Support SLA
+
+---
+
 ## Key Insight
 
 Every existing tool answers: **"Is this skill safe to install?"**
