@@ -1,6 +1,6 @@
-# Security Sidecar: Skill Integrity Monitor
+# Security Sidecar: OpenClaw Integrity Monitor
 
-A tamper-proof security product that monitors OpenClaw skill files for post-install modification, credential leakage, and malicious patterns — regardless of how the customer runs OpenClaw.
+A tamper-proof security product that monitors OpenClaw's entire runtime state — skills, workspace identity files, auth profiles — for post-install tampering, credential leakage, prompt injection via filesystem, and malicious patterns. Works regardless of how the customer runs OpenClaw.
 
 ---
 
@@ -8,16 +8,17 @@ A tamper-proof security product that monitors OpenClaw skill files for post-inst
 
 ```
     INSTALL TIME                          RUNTIME
-    ┌──────────┐                         ┌──────────┐
-    │ VirusTotal│  ──── time passes ───► │ Skill is │
-    │ Clawdex  │  skill passes scan      │ modified │
-    │ Bitdefend│                          │ silently │
-    └──────────┘                         └──────────┘
-         ✅ Clean                            ❌ Compromised
+    ┌──────────┐                         ┌─────────────────────────┐
+    │ VirusTotal│  ──── time passes ───► │ Skill is modified       │
+    │ Clawdex  │  skill passes scan      │ SOUL.md is rewritten    │
+    │ Bitdefend│                          │ HEARTBEAT.md gets C2    │
+    └──────────┘                         │ auth-profiles.json swapped│
+         ✅ Clean                         └─────────────────────────┘
+                                             ❌ Compromised
                                              (nobody notices)
 ```
 
-All existing tools scan at **install time**. Nothing watches skills at **runtime**. A malicious skill (or compromised process) can rewrite a trusted skill after it passes all checks.
+All existing tools scan at **install time**. Nothing watches at **runtime**. A malicious skill (or compromised process) can rewrite trusted skills, inject prompt injection into workspace identity files (SOUL.md, IDENTITY.md, USER.md), add C2 check-ins to HEARTBEAT.md, or swap API keys in auth-profiles.json — all after passing every scan.
 
 ---
 
@@ -62,14 +63,16 @@ graph TB
         end
 
         subgraph "security sidecar container"
-            SCANNER[Skill Integrity Monitor]
+            SCANNER[OpenClaw Integrity Monitor]
             SIGDB[Signature DB<br/><i>baked into image</i>]
             HASHDB[Checksum Manifest<br/><i>generated at first scan</i>]
             REPORT[Report Engine]
         end
 
-        subgraph "shared read-only volume"
-            VOL[(skills directory<br/>mounted read-only<br/>into sidecar)]
+        subgraph "shared read-only volumes"
+            VOL1[(skills/<br/>mounted :ro)]
+            VOL2[(workspace/<br/>mounted :ro)]
+            VOL3[(agents/<br/>mounted :ro)]
         end
     end
 
@@ -78,8 +81,11 @@ graph TB
         UPDATE[Signature Updates<br/><i>pull from registry</i>]
     end
 
-    SKILLS1 -.->|"bind mount :ro"| VOL
-    VOL -->|"read-only access"| SCANNER
+    SKILLS1 -.->|"bind mount :ro"| VOL1
+    WORKSPACE1 -.->|"bind mount :ro"| VOL2
+    VOL1 -->|"read-only access"| SCANNER
+    VOL2 -->|"read-only access"| SCANNER
+    VOL3 -->|"read-only access"| SCANNER
     SCANNER --> HASHDB
     SCANNER --> SIGDB
     SCANNER --> REPORT
@@ -108,27 +114,36 @@ services:
     image: openclaw-sandbox
     volumes:
       - openclaw-skills:/home/claw/.openclaw/skills
+      - openclaw-workspace:/home/claw/.openclaw/workspace
+      - openclaw-agents:/home/claw/.openclaw/agents
 
-  skill-monitor:
+  secfirm-monitor:
     image: security_firm/skill-monitor:latest
     volumes:
-      - openclaw-skills:/watch/skills:ro    # read-only!
+      - openclaw-skills:/watch/skills:ro          # read-only!
+      - openclaw-workspace:/watch/workspace:ro    # read-only!
+      - openclaw-agents:/watch/agents:ro          # read-only!
     environment:
-      - SCAN_INTERVAL=60                     # seconds
-      - ALERT_WEBHOOK=https://...            # optional
+      - SCAN_INTERVAL=60                           # seconds
+      - ALERT_WEBHOOK=https://...                  # optional
+      - WORKSPACE_MODE=enforce                     # monitor|enforce|lockdown
     restart: unless-stopped
 
 volumes:
   openclaw-skills:
+  openclaw-workspace:
+  openclaw-agents:
 ```
 
 2. **Sidecar runs a scan loop:**
-   - On first run: checksums all skill files, stores manifest
+   - On first run: checksums all files in skills/, workspace/, and agents/, stores manifest
    - Every interval: re-checksums, diffs against manifest
-   - On change detected: runs full signature scan on modified files
-   - Reports: tamper alert + malicious pattern matches
+   - On skill change: runs full signature scan on modified skill files
+   - On workspace change: checks for prompt injection patterns, reverts if in enforce mode
+   - On auth profile change: alerts immediately (potential key theft/swap)
+   - Reports: tamper alert + malicious pattern matches + identity drift
 
-3. **OpenClaw container cannot reach the sidecar** — different namespace, no shared network needed, skill volume is read-only in the sidecar.
+3. **OpenClaw container cannot reach the sidecar** — different namespace, no shared network needed, all volumes are read-only in the sidecar.
 
 ### Why Sidecar Is Tamper-Proof
 
@@ -136,6 +151,8 @@ volumes:
                     OpenClaw Container          Sidecar Container
                     ┌─────────────────┐         ┌─────────────────┐
                     │ Can write skills │         │ Can READ skills │
+                    │ Can write workspace│       │ Can READ workspace│
+                    │ Can write auth   │         │ Can READ auth   │
                     │ Can exec code   │         │ Cannot write    │
                     │ CANNOT reach    │────X────│ CANNOT be       │
                     │ sidecar         │         │ reached         │
@@ -144,8 +161,7 @@ volumes:
                                                 ▼
                                         Scanner binary is
                                         baked into image.
-                                        No writable layer
-                                        for skill dir.
+                                        No writable layer.
                                         Separate PID/net
                                         namespace.
 ```
@@ -162,6 +178,8 @@ graph TB
         subgraph "User Space (claw user)"
             OC[OpenClaw Agent<br/><i>runs as user</i>]
             SKILLS[~/.openclaw/skills/]
+            WORKSPACE[~/.openclaw/workspace/]
+            AGENTS[~/.openclaw/agents/]
         end
 
         subgraph "System Space (root)"
@@ -178,6 +196,8 @@ graph TB
     end
 
     SKILLS -->|"FSEvents notify"| FSWATCH
+    WORKSPACE -->|"FSEvents notify"| FSWATCH
+    AGENTS -->|"FSEvents notify"| FSWATCH
     FSWATCH -->|"change detected"| DAEMON
     DAEMON --> HASHDB
     DAEMON --> SIGDB
@@ -199,12 +219,12 @@ graph TB
 
 | macOS Feature | How We Use It |
 |---|---|
-| **FSEvents** | Kernel-level file system event notifications. Instant detection when any skill file changes — no polling needed. |
+| **FSEvents** | Kernel-level file system event notifications. Instant detection when any file changes in skills/, workspace/, or agents/ — no polling needed. |
 | **LaunchDaemon** | Runs as root via `/Library/LaunchDaemons/`. OpenClaw (running as user) cannot kill, modify, or signal it. Survives logout. |
 | **Code Signing** | Monitor binary is signed with a Developer ID. macOS Gatekeeper verifies it. Tampered binary won't launch. |
 | **Notarization** | Apple notarizes the .pkg installer. Users get a clean install experience, no security warnings. |
 | **System Integrity Protection (SIP)** | Signature DB stored in `/Library/SecurityFirm/` — user-space processes cannot modify `/Library/` contents without authorization. |
-| **Endpoint Security Framework** | (Advanced) Can hook into ES framework for real-time file operation interception — block writes to skill directories entirely, not just detect. |
+| **Endpoint Security Framework** | (Advanced) Can hook into ES framework for real-time file operation interception — block unauthorized writes to skills/, workspace/, and agents/ directories entirely, not just detect. |
 | **Keychain** | Store alert webhook credentials in macOS Keychain — not in a config file that OpenClaw could read. |
 
 ### Installation
@@ -237,7 +257,9 @@ sudo installer -pkg secfirm-monitor.pkg -target /
     <array>
         <string>/Library/SecurityFirm/secfirm-monitor</string>
         <string>--watch</string>
-        <string>/Users/*/. openclaw/skills</string>
+        <string>/Users/*/.openclaw/skills</string>
+        <string>/Users/*/.openclaw/workspace</string>
+        <string>/Users/*/.openclaw/agents</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -267,9 +289,10 @@ For customers running OpenClaw on Linux servers or desktops.
 │  │                  │   │                      │ │
 │  │ ~/.openclaw/     │   │ inotify watcher      │ │
 │  │   skills/ ───────────► change detected      │ │
-│  │                  │   │   ├─ checksum verify  │ │
-│  │                  │   │   ├─ signature scan   │ │
-│  │ cannot kill or   │   │   └─ alert/block      │ │
+│  │   workspace/ ────────► checksum verify      │ │
+│  │   agents/ ───────────► signature scan       │ │
+│  │                  │   │   └─ alert/block      │ │
+│  │ cannot kill or   │   │                      │ │
 │  │ modify daemon    │   │                      │ │
 │  └─────────────────┘   └──────────────────────┘ │
 │                                                  │
@@ -279,13 +302,13 @@ For customers running OpenClaw on Linux servers or desktops.
 └──────────────────────────────────────────────────┘
 ```
 
-Uses `inotify` instead of FSEvents. Same privilege separation — daemon runs as root, OpenClaw runs as user.
+Uses `inotify` instead of FSEvents. Watches all three directories (skills/, workspace/, agents/). Same privilege separation — daemon runs as root, OpenClaw runs as user.
 
 ---
 
 ## What Gets Monitored
 
-The sidecar watches **two critical directories**, not just skills:
+The sidecar watches **three critical directories**, not just skills:
 
 ```
 ~/.openclaw/
@@ -293,14 +316,18 @@ The sidecar watches **two critical directories**, not just skills:
 │   ├── moltbook/
 │   ├── shield/
 │   └── ...
-└── workspace/           ← Agent identity files (NEW threat surface)
-    ├── IDENTITY.md
-    ├── SOUL.md
-    ├── USER.md
-    ├── HEARTBEAT.md
-    ├── AGENTS.md
-    ├── TOOLS.md
-    └── BOOTSTRAP.md
+├── workspace/           ← Agent identity files (NEW threat surface)
+│   ├── IDENTITY.md
+│   ├── SOUL.md
+│   ├── USER.md
+│   ├── HEARTBEAT.md
+│   ├── AGENTS.md
+│   ├── TOOLS.md
+│   └── BOOTSTRAP.md
+└── agents/              ← Auth profiles & agent config (CRITICAL)
+    └── main/
+        └── agent/
+            └── auth-profiles.json
 ```
 
 ### Why Workspace Files Matter
@@ -451,6 +478,9 @@ Works with Docker          ✅         ✅        ✅            ✅
 Real-time detection        ❌         ❌        ❌            ✅
 API for automation         ✅         ✅        ❌            ✅
 Runs locally (no cloud)    ❌         ❌        ❌            ✅
+Workspace file monitoring  ❌         ❌        ❌            ✅
+Auth profile monitoring    ❌         ❌        ❌            ✅
+Prompt injection detection ❌         ❌        ❌            ✅
 Integrity checksums        ❌         ❌        ❌            ✅
 ```
 
@@ -464,13 +494,14 @@ Integrity checksums        ❌         ❌        ❌            ✅
 │   CUSTOMER ENVIRONMENT            SECURITY_FIRM          │
 │                                                             │
 │   ┌───────────────┐              ┌────────────────────┐     │
-│   │   OpenClaw    │              │  Skill Monitor     │     │
+│   │   OpenClaw    │              │  Integrity Monitor │     │
 │   │   (any mode)  │              │  (tamper-proof)     │     │
 │   │               │   watches    │                    │     │
 │   │  ~/.openclaw/ ├─────────────►│  Integrity engine  │     │
 │   │    skills/    │  (read-only) │  Signature engine   │     │
-│   │               │              │  Behavior engine    │     │
-│   └───────────────┘              │  Drift engine       │     │
+│   │    workspace/ │              │  Behavior engine    │     │
+│   │    agents/    │              │  Drift engine       │     │
+│   └───────────────┘              │  Injection engine   │     │
 │                                  └─────────┬──────────┘     │
 │   Deployment:                              │                │
 │   ├─ Docker → sidecar container            │                │
@@ -539,11 +570,11 @@ Installs a standalone binary that runs outside OpenClaw. Can't be tampered with 
 brew tap security-firm/tools
 brew install secfirm-monitor
 
-# Run one-off scan
-secfirm-monitor scan ~/.openclaw/skills/
+# Run one-off scan (scans skills, workspace, and agents)
+secfirm-monitor scan ~/.openclaw/
 
 # Run as persistent watcher (foreground)
-secfirm-monitor watch ~/.openclaw/skills/
+secfirm-monitor watch ~/.openclaw/
 
 # Install as LaunchDaemon (requires sudo, full protection)
 sudo secfirm-monitor install-daemon
@@ -644,6 +675,6 @@ The free tiers do the scanning. The paid tier adds:
 
 Every existing tool answers: **"Is this skill safe to install?"**
 
-This product answers: **"Is this skill still the same one you installed?"**
+This product answers: **"Are your skills, identity, and credentials still what you approved?"**
 
-That's the gap. That's the product.
+Skills, workspace files, auth profiles — the entire `.openclaw/` runtime state, continuously verified. That's the gap. That's the product.
