@@ -1,0 +1,103 @@
+services:
+  # ── API proxy (holds the real keys, never exposed to openclaw) ──
+  api-proxy:
+    build: ./proxy
+    image: openclaw-api-proxy
+    container_name: api-proxy
+    hostname: api-proxy
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /tmp
+    networks:
+      - net-oc1
+      - net-oc2
+    restart: unless-stopped
+
+  # ── OpenClaw containers (no API keys, talk to proxy instead) ────
+  openclaw-1:
+    build:
+      context: .
+      dockerfile: Dockerfile.openclaw
+    image: openclaw-sandbox
+    container_name: openclaw-1
+    hostname: openclaw-1
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./shared/openclaw-1:/workspace
+      - openclaw-1-home:/home/claw/.openclaw
+    environment:
+      - ANTHROPIC_BASE_URL=http://api-proxy:18080/anthropic
+      - ANTHROPIC_API_KEY=proxy
+      - OPENAI_BASE_URL=http://api-proxy:18080/openai
+      - OPENAI_API_KEY=proxy
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - net-oc1
+    restart: unless-stopped
+
+  openclaw-2:
+    build:
+      context: .
+      dockerfile: Dockerfile.openclaw
+    image: openclaw-sandbox
+    container_name: openclaw-2
+    hostname: openclaw-2
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./shared/openclaw-2:/workspace
+      - openclaw-2-home:/home/claw/.openclaw
+    environment:
+      - ANTHROPIC_BASE_URL=http://api-proxy:18080/anthropic
+      - ANTHROPIC_API_KEY=proxy
+      - OPENAI_BASE_URL=http://api-proxy:18080/openai
+      - OPENAI_API_KEY=proxy
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - net-oc2
+    restart: unless-stopped
+
+volumes:
+  openclaw-1-home:
+  openclaw-2-home:
+
+networks:
+  # Each openclaw container gets its own network — they cannot see each other.
+  # The proxy bridges both so it can serve API requests to either.
+  net-oc1:
+    driver: bridge
+  net-oc2:
+    driver: bridge

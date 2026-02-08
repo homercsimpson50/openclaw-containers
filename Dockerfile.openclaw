@@ -1,0 +1,40 @@
+FROM node:22-bookworm
+
+# Install useful tools for a dev/agent environment
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    curl \
+    wget \
+    vim \
+    less \
+    jq \
+    openssh-client \
+    ca-certificates \
+    python3 \
+    build-essential \
+    chromium \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OpenClaw globally
+RUN npm install -g openclaw@latest
+
+# Create a non-root user
+RUN useradd -m -s /bin/bash claw && \
+    mkdir -p /workspace && \
+    chown claw:claw /workspace && \
+    mkdir -p /home/claw/.openclaw && \
+    chown claw:claw /home/claw/.openclaw
+
+VOLUME /workspace
+
+# Switch to non-root user
+USER claw
+WORKDIR /workspace
+
+# Git config
+RUN git config --global user.name "openclaw-container" && \
+    git config --global user.email "openclaw@container" && \
+    git config --global init.defaultBranch main
+
+# Keep container alive for exec-ing into
+CMD ["sleep", "infinity"]

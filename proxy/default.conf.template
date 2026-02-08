@@ -1,0 +1,38 @@
+server {
+    listen 18080;
+
+    # Anthropic API proxy — injects the real API key
+    location /anthropic/ {
+        proxy_pass https://api.anthropic.com/;
+        proxy_ssl_server_name on;
+        proxy_set_header Host api.anthropic.com;
+        proxy_set_header x-api-key ${ANTHROPIC_API_KEY};
+        proxy_set_header Connection "";
+        proxy_http_version 1.1;
+
+        # Streaming support (SSE)
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+    }
+
+    # OpenAI API proxy — injects the real API key
+    location /openai/ {
+        proxy_pass https://api.openai.com/;
+        proxy_ssl_server_name on;
+        proxy_set_header Host api.openai.com;
+        proxy_set_header Authorization "Bearer ${OPENAI_API_KEY}";
+        proxy_set_header Connection "";
+        proxy_http_version 1.1;
+
+        # Streaming support (SSE)
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 300s;
+    }
+
+    # Reject everything else
+    location / {
+        return 444;
+    }
+}
