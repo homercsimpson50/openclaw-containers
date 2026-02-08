@@ -21,11 +21,15 @@ OpenClaw containers:
   connect <N>           Open bash shell in openclaw-N
   run <N> [msg]         Launch OpenClaw agent in openclaw-N
   gateway <N>           Start OpenClaw gateway in openclaw-N
+  dashboard <N>         Start gateway (background) and print web URL
   onboard <N>           Run OpenClaw onboarding wizard in openclaw-N
   add <N>               Add a new openclaw-N container
   rm <N>                Remove openclaw-N container
   logs <N>              Tail logs for openclaw-N
   exec <N> <cmd>        Run command in openclaw-N
+
+Moltbook:
+  moltbook-install <N>        Download Moltbook skill into openclaw-N
 
 Proxy:
   proxy-logs            Tail API proxy logs
@@ -87,15 +91,17 @@ cmd_connect() {
 }
 
 cmd_run() {
-    local n="${1:?Usage: ./manage.sh run <N> [message]}"
+    local n="${1:?Usage: ./manage.sh run <N> <message>}"
     shift
     local msg="${*:-}"
-    echo "Launching OpenClaw agent in openclaw-${n}..."
-    if [ -n "$msg" ]; then
-        docker exec -it "openclaw-${n}" openclaw agent --message "$msg"
-    else
-        docker exec -it "openclaw-${n}" openclaw agent
+    if [ -z "$msg" ]; then
+        echo "Usage: ./manage.sh run <N> <message>" >&2
+        echo "  A message is required (OpenClaw agent --local requires -m)." >&2
+        echo "  For interactive shell: ./manage.sh connect ${n}" >&2
+        exit 1
     fi
+    echo "Launching OpenClaw agent in openclaw-${n}..."
+    docker exec -it "openclaw-${n}" openclaw agent --local -m "$msg"
 }
 
 cmd_gateway() {
@@ -161,6 +167,69 @@ cmd_exec() {
     docker exec -it "openclaw-${n}" "$@"
 }
 
+cmd_dashboard() {
+    local n="${1:?Usage: ./manage.sh dashboard <N>}"
+    local container="openclaw-${n}"
+
+    # Verify container is running
+    if ! docker ps --format '{{.Names}}' | grep -q "^${container}$"; then
+        echo "Error: ${container} is not running. Start with: ./manage.sh up" >&2
+        exit 1
+    fi
+
+    # Determine host port from container number
+    local host_port=$((18000 + n))
+
+    # Check if gateway is already running inside the container
+    if docker exec "$container" pgrep -f "openclaw gateway" >/dev/null 2>&1; then
+        echo "Gateway already running in ${container}."
+    else
+        echo "Starting gateway in ${container} (background)..."
+        docker exec -d "$container" openclaw gateway --port 18789 --verbose
+        sleep 2
+    fi
+
+    echo ""
+    echo "Web dashboard for openclaw-${n}:"
+    echo "  http://localhost:${host_port}"
+    echo ""
+    echo "To stop the gateway, restart the container:"
+    echo "  ./manage.sh rm ${n} && ./manage.sh up"
+}
+
+cmd_moltbook_install() {
+    local n="${1:?Usage: ./manage.sh moltbook-install <N>}"
+    local container="openclaw-${n}"
+
+    # Verify container is running
+    if ! docker ps --format '{{.Names}}' | grep -q "^${container}$"; then
+        echo "Error: ${container} is not running." >&2
+        exit 1
+    fi
+
+    echo "Downloading Moltbook skill into ${container}..."
+
+    # Create skill directory and download all skill files
+    docker exec "$container" mkdir -p /home/claw/.openclaw/skills/moltbook
+    docker exec "$container" bash -c \
+        'curl -sL https://www.moltbook.com/skill.md > /home/claw/.openclaw/skills/moltbook/SKILL.md'
+    docker exec "$container" bash -c \
+        'curl -sL https://www.moltbook.com/heartbeat.md > /home/claw/.openclaw/skills/moltbook/HEARTBEAT.md'
+    docker exec "$container" bash -c \
+        'curl -sL https://www.moltbook.com/messaging.md > /home/claw/.openclaw/skills/moltbook/MESSAGING.md'
+    docker exec "$container" bash -c \
+        'curl -sL https://www.moltbook.com/skill.json > /home/claw/.openclaw/skills/moltbook/package.json'
+
+    echo ""
+    echo "Moltbook skill installed in ${container}."
+    echo ""
+    echo "Next steps:"
+    echo "  1. Start the agent:  ./manage.sh run ${n}"
+    echo "  2. The agent will register itself on Moltbook"
+    echo "  3. The agent sends you a claim link"
+    echo "  4. You claim it, agent starts posting"
+}
+
 cmd_proxy_logs() {
     docker logs -f api-proxy
 }
@@ -168,19 +237,21 @@ cmd_proxy_logs() {
 # ── Dispatch ──────────────────────────────────────────────────────
 
 case "${1:-}" in
-    build)      cmd_build ;;
-    up)         cmd_up ;;
-    down)       cmd_down ;;
-    status)     cmd_status ;;
-    clean)      cmd_clean ;;
-    connect)    cmd_connect "${2:-}" ;;
-    run)        shift; cmd_run "$@" ;;
-    gateway)    cmd_gateway "${2:-}" ;;
-    onboard)    cmd_onboard "${2:-}" ;;
-    add)        cmd_add "${2:-}" ;;
-    rm)         cmd_rm "${2:-}" ;;
-    logs)       cmd_logs "${2:-}" ;;
-    exec)       shift; cmd_exec "$@" ;;
-    proxy-logs) cmd_proxy_logs ;;
-    *)          usage ;;
+    build)              cmd_build ;;
+    up)                 cmd_up ;;
+    down)               cmd_down ;;
+    status)             cmd_status ;;
+    clean)              cmd_clean ;;
+    connect)            cmd_connect "${2:-}" ;;
+    run)                shift; cmd_run "$@" ;;
+    gateway)            cmd_gateway "${2:-}" ;;
+    dashboard)          cmd_dashboard "${2:-}" ;;
+    onboard)            cmd_onboard "${2:-}" ;;
+    add)                cmd_add "${2:-}" ;;
+    rm)                 cmd_rm "${2:-}" ;;
+    logs)               cmd_logs "${2:-}" ;;
+    exec)               shift; cmd_exec "$@" ;;
+    moltbook-install)   cmd_moltbook_install "${2:-}" ;;
+    proxy-logs)         cmd_proxy_logs ;;
+    *)                  usage ;;
 esac

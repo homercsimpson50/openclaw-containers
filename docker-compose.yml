@@ -19,17 +19,22 @@ services:
       - ALL
     cap_add:
       - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
     read_only: true
     tmpfs:
       - /var/cache/nginx
       - /var/run
       - /tmp
+      - /etc/nginx/conf.d
     networks:
       - net-oc1
       - net-oc2
     restart: unless-stopped
 
-  # ── OpenClaw containers (no API keys, talk to proxy instead) ────
+  # ── OpenClaw containers (own budget-limited keys) ──────────────
+  # ── Bart (creative / experimental) ─────────────────────────────
   openclaw-1:
     build:
       context: .
@@ -39,6 +44,8 @@ services:
     hostname: openclaw-1
     stdin_open: true
     tty: true
+    ports:
+      - "18001:18789"
     volumes:
       - ./shared/openclaw-1:/workspace
       - openclaw-1-home:/home/claw/.openclaw
@@ -60,6 +67,7 @@ services:
       - net-oc1
     restart: unless-stopped
 
+  # ── Lisa (analytical / careful) ──────────────────────────────────
   openclaw-2:
     build:
       context: .
@@ -69,6 +77,8 @@ services:
     hostname: openclaw-2
     stdin_open: true
     tty: true
+    ports:
+      - "18002:18789"
     volumes:
       - ./shared/openclaw-2:/workspace
       - openclaw-2-home:/home/claw/.openclaw
