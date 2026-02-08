@@ -110,7 +110,7 @@ services:
       - openclaw-skills:/home/claw/.openclaw/skills
 
   skill-monitor:
-    image: pivetta/skill-monitor:latest
+    image: security_firm/skill-monitor:latest
     volumes:
       - openclaw-skills:/watch/skills:ro    # read-only!
     environment:
@@ -165,9 +165,9 @@ graph TB
         end
 
         subgraph "System Space (root)"
-            DAEMON[pivetta-monitor<br/><i>LaunchDaemon</i>]
+            DAEMON[secfirm-monitor<br/><i>LaunchDaemon</i>]
             FSWATCH[FSEvents Watcher]
-            HASHDB[Checksum Manifest<br/><i>/Library/PivettaSec/</i>]
+            HASHDB[Checksum Manifest<br/><i>/Library/SecurityFirm/</i>]
             SIGDB[Signature DB<br/><i>signed + read-only</i>]
         end
     end
@@ -203,7 +203,7 @@ graph TB
 | **LaunchDaemon** | Runs as root via `/Library/LaunchDaemons/`. OpenClaw (running as user) cannot kill, modify, or signal it. Survives logout. |
 | **Code Signing** | Monitor binary is signed with a Developer ID. macOS Gatekeeper verifies it. Tampered binary won't launch. |
 | **Notarization** | Apple notarizes the .pkg installer. Users get a clean install experience, no security warnings. |
-| **System Integrity Protection (SIP)** | Signature DB stored in `/Library/PivettaSec/` — user-space processes cannot modify `/Library/` contents without authorization. |
+| **System Integrity Protection (SIP)** | Signature DB stored in `/Library/SecurityFirm/` — user-space processes cannot modify `/Library/` contents without authorization. |
 | **Endpoint Security Framework** | (Advanced) Can hook into ES framework for real-time file operation interception — block writes to skill directories entirely, not just detect. |
 | **Keychain** | Store alert webhook credentials in macOS Keychain — not in a config file that OpenClaw could read. |
 
@@ -213,14 +213,14 @@ Distributed as a signed `.pkg`:
 
 ```bash
 # Download and install
-curl -O https://releases.pivetta.security/monitor/latest/pivetta-monitor.pkg
-sudo installer -pkg pivetta-monitor.pkg -target /
+curl -O https://releases.security-firm.example.com/monitor/latest/secfirm-monitor.pkg
+sudo installer -pkg secfirm-monitor.pkg -target /
 
 # Installs:
-#   /Library/PivettaSec/pivetta-monitor          (binary)
-#   /Library/PivettaSec/signatures.db            (threat signatures)
-#   /Library/PivettaSec/config.json              (alert config)
-#   /Library/LaunchDaemons/com.pivetta.monitor.plist
+#   /Library/SecurityFirm/secfirm-monitor          (binary)
+#   /Library/SecurityFirm/signatures.db            (threat signatures)
+#   /Library/SecurityFirm/config.json              (alert config)
+#   /Library/LaunchDaemons/com.security-firm.monitor.plist
 ```
 
 ### LaunchDaemon plist
@@ -232,10 +232,10 @@ sudo installer -pkg pivetta-monitor.pkg -target /
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.pivetta.skill-monitor</string>
+    <string>com.security-firm.skill-monitor</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Library/PivettaSec/pivetta-monitor</string>
+        <string>/Library/SecurityFirm/secfirm-monitor</string>
         <string>--watch</string>
         <string>/Users/*/. openclaw/skills</string>
     </array>
@@ -244,9 +244,9 @@ sudo installer -pkg pivetta-monitor.pkg -target /
     <key>KeepAlive</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/Library/Logs/PivettaSec/monitor.log</string>
+    <string>/Library/Logs/SecurityFirm/monitor.log</string>
     <key>StandardErrorPath</key>
-    <string>/Library/Logs/PivettaSec/monitor.err</string>
+    <string>/Library/Logs/SecurityFirm/monitor.err</string>
 </dict>
 </plist>
 ```
@@ -262,7 +262,7 @@ For customers running OpenClaw on Linux servers or desktops.
 │ Linux Host                                       │
 │                                                  │
 │  ┌─────────────────┐   ┌──────────────────────┐ │
-│  │ OpenClaw Agent   │   │ pivetta-monitor      │ │
+│  │ OpenClaw Agent   │   │ secfirm-monitor      │ │
 │  │ (runs as user)   │   │ (runs as root)       │ │
 │  │                  │   │                      │ │
 │  │ ~/.openclaw/     │   │ inotify watcher      │ │
@@ -273,9 +273,9 @@ For customers running OpenClaw on Linux servers or desktops.
 │  │ modify daemon    │   │                      │ │
 │  └─────────────────┘   └──────────────────────┘ │
 │                                                  │
-│  systemd unit: pivetta-monitor.service           │
-│  Signatures: /opt/pivetta/signatures.db          │
-│  Manifests:  /opt/pivetta/manifests/             │
+│  systemd unit: secfirm-monitor.service           │
+│  Signatures: /opt/security_firm/signatures.db          │
+│  Manifests:  /opt/security_firm/manifests/             │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -332,7 +332,7 @@ Uses `inotify` instead of FSEvents. Same privilege separation — daemon runs as
 ## Comparison: Why This Beats Existing Tools
 
 ```
-                        VirusTotal  Clawdex  Bitdefender  Pivetta Monitor
+                        VirusTotal  Clawdex  Bitdefender  Security_Firm Monitor
                         ─────────── ──────── ─────────── ────────────────
 Scan at install            ✅         ✅        ✅            ✅
 Scan at runtime            ❌         ❌        ❌            ✅
@@ -354,7 +354,7 @@ Integrity checksums        ❌         ❌        ❌            ✅
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                                                             │
-│   CUSTOMER ENVIRONMENT            PIVETTA SECURITY          │
+│   CUSTOMER ENVIRONMENT            SECURITY_FIRM          │
 │                                                             │
 │   ┌───────────────┐              ┌────────────────────┐     │
 │   │   OpenClaw    │              │  Skill Monitor     │     │
@@ -410,13 +410,13 @@ Lowest friction install. Customer gets it as a ClawHub/npm skill. Good for try-b
 
 ```bash
 # Install via ClawHub
-npx clawhub@latest install pivetta-shield
+npx clawhub@latest install secfirm-shield
 
 # Or install via npm directly
-npm install -g @pivetta/skill-monitor
+npm install -g @security_firm/skill-monitor
 
 # Or manual
-curl -sL https://pivetta.security/skill.md > ~/.openclaw/skills/pivetta-shield/SKILL.md
+curl -sL https://security-firm.example.com/skill.md > ~/.openclaw/skills/secfirm-shield/SKILL.md
 ```
 
 **Best for:** Individual developers, quick evaluation, CI/CD pre-install scanning.
@@ -429,17 +429,17 @@ Installs a standalone binary that runs outside OpenClaw. Can't be tampered with 
 
 ```bash
 # Install
-brew tap pivetta-security/tools
-brew install pivetta-monitor
+brew tap security-firm/tools
+brew install secfirm-monitor
 
 # Run one-off scan
-pivetta-monitor scan ~/.openclaw/skills/
+secfirm-monitor scan ~/.openclaw/skills/
 
 # Run as persistent watcher (foreground)
-pivetta-monitor watch ~/.openclaw/skills/
+secfirm-monitor watch ~/.openclaw/skills/
 
 # Install as LaunchDaemon (requires sudo, full protection)
-sudo pivetta-monitor install-daemon
+sudo secfirm-monitor install-daemon
 ```
 
 **Best for:** macOS power users, security-conscious developers who want always-on monitoring without Docker.
@@ -447,14 +447,14 @@ sudo pivetta-monitor install-daemon
 **Binary built with:** Go or Rust (single static binary, no dependencies, cross-platform).
 
 **What `brew install` gives you:**
-- `pivetta-monitor` CLI binary
-- Signature database at `$(brew --prefix)/share/pivetta/signatures.db`
+- `secfirm-monitor` CLI binary
+- Signature database at `$(brew --prefix)/share/security_firm/signatures.db`
 - Man page
 - Shell completions (bash/zsh/fish)
 
-**What `sudo pivetta-monitor install-daemon` adds:**
-- LaunchDaemon plist at `/Library/LaunchDaemons/com.pivetta.monitor.plist`
-- Copies binary + signatures to `/Library/PivettaSec/`
+**What `sudo secfirm-monitor install-daemon` adds:**
+- LaunchDaemon plist at `/Library/LaunchDaemons/com.security-firm.monitor.plist`
+- Copies binary + signatures to `/Library/SecurityFirm/`
 - Starts the daemon immediately
 - Runs as root, survives reboot, can't be killed by user-space OpenClaw
 
@@ -464,7 +464,7 @@ For customers already running OpenClaw in Docker.
 
 ```bash
 # Pull the image
-docker pull pivetta/skill-monitor:latest
+docker pull security_firm/skill-monitor:latest
 
 # Add to existing docker-compose.yml (see Model 1 above)
 ```
@@ -484,17 +484,17 @@ Full system-level installation for enterprise customers who want maximum protect
 
 ```bash
 # macOS — signed .pkg installer
-curl -O https://releases.pivetta.security/monitor/latest/pivetta-monitor.pkg
-sudo installer -pkg pivetta-monitor.pkg -target /
+curl -O https://releases.security-firm.example.com/monitor/latest/secfirm-monitor.pkg
+sudo installer -pkg secfirm-monitor.pkg -target /
 
 # Debian/Ubuntu
-curl -fsSL https://releases.pivetta.security/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/pivetta.gpg
-echo "deb [signed-by=/etc/apt/keyrings/pivetta.gpg] https://releases.pivetta.security/apt stable main" | \
-  sudo tee /etc/apt/sources.list.d/pivetta.list
-sudo apt update && sudo apt install pivetta-monitor
+curl -fsSL https://releases.security-firm.example.com/gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/security-firm.gpg
+echo "deb [signed-by=/etc/apt/keyrings/security-firm.gpg] https://releases.security-firm.example.com/apt stable main" | \
+  sudo tee /etc/apt/sources.list.d/security-firm.list
+sudo apt update && sudo apt install secfirm-monitor
 
 # RHEL/Fedora
-sudo dnf install https://releases.pivetta.security/rpm/pivetta-monitor-latest.rpm
+sudo dnf install https://releases.security-firm.example.com/rpm/secfirm-monitor-latest.rpm
 ```
 
 **Best for:** Enterprise SOC teams, managed deployments, compliance requirements.
@@ -503,9 +503,9 @@ sudo dnf install https://releases.pivetta.security/rpm/pivetta-monitor-latest.rp
 
 | Channel | Install Command | Runs As | Tamper-Proof | Auto-Update | Best For |
 |---|---|---|---|---|---|
-| **npm/ClawHub** | `npx clawhub install pivetta-shield` | User (inside OpenClaw) | No | `clawhub update` | Evaluation, CI/CD |
-| **Homebrew** | `brew install pivetta-monitor` | User or root (daemon) | Yes (daemon mode) | `brew upgrade` | macOS developers |
-| **Docker Hub** | `docker pull pivetta/skill-monitor` | Container (isolated) | Yes | Image tag/pull | Docker deployments |
+| **npm/ClawHub** | `npx clawhub install secfirm-shield` | User (inside OpenClaw) | No | `clawhub update` | Evaluation, CI/CD |
+| **Homebrew** | `brew install secfirm-monitor` | User or root (daemon) | Yes (daemon mode) | `brew upgrade` | macOS developers |
+| **Docker Hub** | `docker pull security_firm/skill-monitor` | Container (isolated) | Yes | Image tag/pull | Docker deployments |
 | **.pkg/.deb/.rpm** | `sudo installer -pkg ...` | Root (system daemon) | Yes | Signed repo updates | Enterprise / SOC |
 
 ### Upgrade Path (Funnel)
